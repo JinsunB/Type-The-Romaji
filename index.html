@@ -870,14 +870,20 @@
                 <p class="text-slate-500 text-[10px] sm:text-xs">Drag to pan, slider to zoom</p>
             </div>
 
-            <div class="relative w-full aspect-square max-w-[256px] mx-auto bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center select-none" id="cropper-container">
+            <div class="relative w-full aspect-square max-w-[256px] mx-auto bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center select-none" id="cropper-container" style="touch-action: none;">
                 <img id="cropper-img" class="absolute origin-center cursor-grab active:cursor-grabbing max-w-none" draggable="false" style="transform: translate(0px, 0px) scale(1);">
                 <div class="absolute inset-0 crop-mask"></div>
+                <!-- Center Point Snapping Crosshair -->
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-70">
+                    <div class="w-4 h-px bg-white/60 absolute"></div>
+                    <div class="w-px h-4 bg-white/60 absolute"></div>
+                    <div class="w-1 h-1 bg-indigo-500 rounded-full shadow-[0_0_0_1px_rgba(255,255,255,0.8)]"></div>
+                </div>
             </div>
 
             <div class="flex items-center gap-2 sm:gap-3">
                 <span class="text-slate-400 text-xs sm:text-sm">➖</span>
-                <input type="range" id="cropper-zoom" min="0.5" max="3" step="0.05" value="1" class="w-full h-1.5 sm:h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                <input type="range" id="cropper-zoom" min="0.5" max="3" step="0.01" value="1" class="w-full h-1.5 sm:h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 <span class="text-slate-400 text-xs sm:text-sm">➕</span>
             </div>
 
@@ -2420,10 +2426,33 @@
         const cropperImg = document.getElementById('cropper-img');
         const cropperZoom = document.getElementById('cropper-zoom');
         let dragState = { isDragging: false, startX: 0, startY: 0, panX: 0, panY: 0, scale: 1 };
+        let cropperMinScale = 1;
 
         function triggerCustomAvatarUpload() { 
             cropperContext = 'avatar';
+            brandingTarget = '';
             avatarUploadInput.click(); 
+        }
+
+        function setupCropper(natWidth, natHeight) {
+            dragState = { isDragging: false, startX: 0, startY: 0, panX: 0, panY: 0, scale: 1 };
+            const containerSize = 256;
+            
+            // Calc minimum scale so image always covers the 256x256 crop box completely
+            const minScaleX = containerSize / natWidth;
+            const minScaleY = containerSize / natHeight;
+            cropperMinScale = Math.max(minScaleX, minScaleY);
+            
+            dragState.scale = cropperMinScale; // Start perfectly auto-fitted
+            dragState.panX = 0;
+            dragState.panY = 0;
+            
+            cropperZoom.min = cropperMinScale;
+            cropperZoom.max = cropperMinScale * 4;
+            cropperZoom.value = dragState.scale;
+            
+            updateCropperTransform();
+            cropperModal.classList.remove('hidden');
         }
 
         avatarUploadInput.addEventListener('change', (e) => {
@@ -2431,51 +2460,104 @@
             if (!file) return;
             const reader = new FileReader();
             reader.onload = (event) => {
-                cropperImg.src = event.target.result;
-                cropperImg.onload = () => {
-                    dragState = { isDragging: false, startX: 0, startY: 0, panX: 0, panY: 0, scale: 1 };
-                    const containerSize = 256;
-                    const scaleX = containerSize / cropperImg.naturalWidth;
-                    const scaleY = containerSize / cropperImg.naturalHeight;
-                    dragState.scale = Math.max(scaleX, scaleY);
-                    dragState.panX = (containerSize - (cropperImg.naturalWidth * dragState.scale)) / 2;
-                    dragState.panY = (containerSize - (cropperImg.naturalHeight * dragState.scale)) / 2;
-                    cropperZoom.value = dragState.scale;
-                    cropperZoom.min = dragState.scale * 0.5;
-                    cropperZoom.max = dragState.scale * 5;
-                    updateCropperTransform();
-                    cropperModal.classList.remove('hidden');
-                    avatarUploadInput.value = '';
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    cropperImg.src = event.target.result;
+                    setupCropper(img.naturalWidth, img.naturalHeight);
                 };
             };
             reader.readAsDataURL(file);
+            e.target.value = '';
         });
 
-        function updateCropperTransform() { cropperImg.style.transform = `translate(${dragState.panX}px, ${dragState.panY}px) scale(${dragState.scale})`; }
+        document.getElementById('branding-upload-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    if (brandingTarget === 'intro') {
+                        // Banners completely bypass the cropper to maintain their natural dimensions
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        const MAX_WIDTH = 800; // Constrain overly large banners
+                        let width = img.naturalWidth;
+                        let height = img.naturalHeight;
+                        if (width > MAX_WIDTH) {
+                            height = Math.floor((MAX_WIDTH / width) * height);
+                            width = MAX_WIDTH;
+                        }
+                        canvas.width = width;
+                        canvas.height = height;
+                        ctx.drawImage(img, 0, 0, width, height);
+                        const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+                        
+                        globalBranding.introImage = base64Image;
+                        document.getElementById('intro-preview-small').innerHTML = `<img src="${base64Image}" class="w-full h-full object-contain"/>`;
+                        return;
+                    }
+                    
+                    // Logos still use the square cropper
+                    cropperContext = 'branding';
+                    cropperImg.src = event.target.result;
+                    setupCropper(img.naturalWidth, img.naturalHeight);
+                };
+            };
+            reader.readAsDataURL(file);
+            e.target.value = '';
+        });
+
+        function clampPan() {
+            const containerSize = 256;
+            const imgWidth = cropperImg.naturalWidth * dragState.scale;
+            const imgHeight = cropperImg.naturalHeight * dragState.scale;
+            
+            // Max allowed pan distance from absolute center without showing empty backgrounds
+            const maxX = Math.max(0, (imgWidth - containerSize) / 2);
+            const maxY = Math.max(0, (imgHeight - containerSize) / 2);
+            
+            // Snap to center perfectly if close enough
+            if (Math.abs(dragState.panX) < 10) dragState.panX = 0;
+            if (Math.abs(dragState.panY) < 10) dragState.panY = 0;
+
+            // Constrain boundaries
+            if (dragState.panX > maxX) dragState.panX = maxX;
+            if (dragState.panX < -maxX) dragState.panX = -maxX;
+            if (dragState.panY > maxY) dragState.panY = maxY;
+            if (dragState.panY < -maxY) dragState.panY = -maxY;
+        }
+
+        function updateCropperTransform() { 
+            cropperImg.style.transform = `translate(${dragState.panX}px, ${dragState.panY}px) scale(${dragState.scale})`; 
+        }
 
         cropperZoom.addEventListener('input', (e) => {
-            const newScale = parseFloat(e.target.value);
-            const containerSize = 256;
-            const centerOffsetX = (containerSize / 2) - dragState.panX;
-            const centerOffsetY = (containerSize / 2) - dragState.panY;
-            const scaleRatio = newScale / dragState.scale;
-            dragState.panX = (containerSize / 2) - (centerOffsetX * scaleRatio);
-            dragState.panY = (containerSize / 2) - (centerOffsetY * scaleRatio);
-            dragState.scale = newScale;
+            dragState.scale = Math.max(parseFloat(e.target.value), cropperMinScale);
+            clampPan();
             updateCropperTransform();
         });
 
         const cropperContainer = document.getElementById('cropper-container');
         cropperContainer.addEventListener('pointerdown', (e) => {
-            dragState.isDragging = true; dragState.startX = e.clientX - dragState.panX; dragState.startY = e.clientY - dragState.panY;
+            dragState.isDragging = true; 
+            dragState.startX = e.clientX - dragState.panX; 
+            dragState.startY = e.clientY - dragState.panY;
             cropperImg.classList.add('cursor-grabbing');
         });
         window.addEventListener('pointermove', (e) => {
             if (!dragState.isDragging) return;
-            dragState.panX = e.clientX - dragState.startX; dragState.panY = e.clientY - dragState.startY;
+            dragState.panX = e.clientX - dragState.startX; 
+            dragState.panY = e.clientY - dragState.startY;
+            clampPan();
             updateCropperTransform();
         });
-        window.addEventListener('pointerup', () => { dragState.isDragging = false; cropperImg.classList.remove('cursor-grabbing'); });
+        window.addEventListener('pointerup', () => { 
+            dragState.isDragging = false; 
+            cropperImg.classList.remove('cursor-grabbing'); 
+        });
 
         function closeCropper() { cropperModal.classList.add('hidden'); }
 
@@ -2483,14 +2565,16 @@
             const canvas = document.createElement('canvas');
             canvas.width = 256; canvas.height = 256;
             const ctx = canvas.getContext('2d');
-            const containerSize = 256;
-            const offX = dragState.panX, offY = dragState.panY;
-            const sx = -offX / dragState.scale, sy = -offY / dragState.scale;
-            const sw = containerSize / dragState.scale, sh = containerSize / dragState.scale;
-
-            ctx.fillStyle = brandingTarget === 'intro' ? "rgba(0,0,0,0)" : "#ffffff"; 
-            ctx.fillRect(0, 0, 256, 256);
-            ctx.drawImage(cropperImg, sx, sy, sw, sh, 0, 0, 256, 256);
+            
+            ctx.clearRect(0, 0, 256, 256); // preserve transparency
+            
+            // Accurately translate center coordinates for precise drawing 
+            ctx.save();
+            ctx.translate(128 + dragState.panX, 128 + dragState.panY);
+            ctx.scale(dragState.scale, dragState.scale);
+            // Draw offset by half natural size to maintain center anchor
+            ctx.drawImage(cropperImg, -cropperImg.naturalWidth / 2, -cropperImg.naturalHeight / 2);
+            ctx.restore();
             
             const base64Image = canvas.toDataURL('image/png', 0.9);
 
@@ -2498,9 +2582,6 @@
                 if (brandingTarget === 'logo') {
                     globalBranding.logoImage = base64Image;
                     document.getElementById('logo-preview-small').innerHTML = `<img src="${base64Image}" class="w-full h-full object-cover"/>`;
-                } else if (brandingTarget === 'intro') {
-                    globalBranding.introImage = base64Image;
-                    document.getElementById('intro-preview-small').innerHTML = `<img src="${base64Image}" class="w-full h-full object-contain"/>`;
                 }
             } else {
                 // Default Avatar Logic
@@ -2512,9 +2593,9 @@
                     setupCustomBtn.innerHTML = getAvatarHTML(base64Image);
                 }
                 
-                if (currentUser && !setupModal.classList.contains('hidden')) {
+                if (currentUser && setupModal.classList.contains('hidden')) {
                     try {
-                        await setDoc(doc(db, "users", auth.currentUser.uid), { avatar: base64Image }, { merge: true });
+                        await setDoc(doc(db, "users", currentUser.uid), { avatar: base64Image }, { merge: true });
                         await updateLeaderboardProfile({ avatar: base64Image });
                         navAvatar.innerHTML = getAvatarHTML(base64Image);
                         document.getElementById('settings-avatar-preview').innerHTML = getAvatarHTML(base64Image);
