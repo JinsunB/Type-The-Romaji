@@ -2480,7 +2480,7 @@
                 img.src = event.target.result;
                 img.onload = () => {
                     if (brandingTarget === 'intro') {
-                        // Banners completely bypass the cropper to maintain their natural dimensions
+                        // Banners completely bypass the cropper to maintain their natural dimensions & transparency
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
                         const MAX_WIDTH = 800; // Constrain overly large banners
@@ -2492,18 +2492,19 @@
                         }
                         canvas.width = width;
                         canvas.height = height;
+                        
+                        ctx.clearRect(0, 0, width, height); // Support transparency
                         ctx.drawImage(img, 0, 0, width, height);
-                        const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+                        const base64Image = canvas.toDataURL('image/png'); // PNG for transparency
                         
                         globalBranding.introImage = base64Image;
                         document.getElementById('intro-preview-small').innerHTML = `<img src="${base64Image}" class="w-full h-full object-contain"/>`;
-                        return;
+                    } else {
+                        // Logos still use the square cropper
+                        cropperContext = 'branding';
+                        cropperImg.src = event.target.result;
+                        setupCropper(img.naturalWidth, img.naturalHeight);
                     }
-                    
-                    // Logos still use the square cropper
-                    cropperContext = 'branding';
-                    cropperImg.src = event.target.result;
-                    setupCropper(img.naturalWidth, img.naturalHeight);
                 };
             };
             reader.readAsDataURL(file);
@@ -2576,7 +2577,7 @@
             ctx.drawImage(cropperImg, -cropperImg.naturalWidth / 2, -cropperImg.naturalHeight / 2);
             ctx.restore();
             
-            const base64Image = canvas.toDataURL('image/png', 0.9);
+            const base64Image = canvas.toDataURL('image/png'); // PNG for transparency
 
             if (cropperContext === 'branding') {
                 if (brandingTarget === 'logo') {
